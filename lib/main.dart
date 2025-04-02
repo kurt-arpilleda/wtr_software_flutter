@@ -1,37 +1,44 @@
 import 'package:flutter/material.dart';
 import 'webview.dart';
-import 'id_input_dialog.dart';
 import 'phorjapan.dart';
-import 'japanFolder/id_input_dialogJP.dart';
 import 'japanFolder/webviewJP.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:unique_identifier/unique_identifier.dart';
+import 'api_service.dart';
+import 'japanFolder/api_serviceJP.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SharedPreferences prefs = await SharedPreferences.getInstance();
   String? phOrJp = prefs.getString('phorjp');
-  String? idNumber;
+  String? deviceId = await UniqueIdentifier.serial;
 
-  String initialRoute;
+  String initialRoute = '/phorjapan'; // Default route
 
   if (phOrJp == null) {
     initialRoute = '/phorjapan';
-  } else if (phOrJp == "ph") {
-    idNumber = prefs.getString('IDNumber');
-    if (idNumber == null) {
-      initialRoute = '/idInput';
-    } else {
-      initialRoute = '/webView';
+  } else if (deviceId != null) {
+    try {
+      dynamic response;
+
+      if (phOrJp == "ph") {
+        final apiService = ApiService();
+        response = await apiService.checkDeviceId(deviceId);
+      } else if (phOrJp == "jp") {
+        final apiServiceJP = ApiServiceJP();
+        response = await apiServiceJP.checkDeviceId(deviceId);
+      }
+
+      if (response['success'] == true) {
+        if (phOrJp == "ph") {
+          initialRoute = '/webView';
+        } else if (phOrJp == "jp") {
+          initialRoute = '/webViewJP';
+        }
+      }
+    } catch (e) {
+      print("Error checking device ID: $e");
     }
-  } else if (phOrJp == "jp") {
-    idNumber = prefs.getString('IDNumberJP');
-    if (idNumber == null) {
-      initialRoute = '/idInputJP';
-    } else {
-      initialRoute = '/webViewJP';
-    }
-  } else {
-    initialRoute = '/phorjapan';
   }
 
   runApp(MyApp(initialRoute: initialRoute));
@@ -51,9 +58,7 @@ class MyApp extends StatelessWidget {
       initialRoute: initialRoute,
       routes: {
         '/phorjapan': (context) => PhOrJpScreen(),
-        '/idInput': (context) => IdInputDialog(),
         '/webView': (context) => SoftwareWebViewScreen(linkID: 5),
-        '/idInputJP': (context) => IdInputDialogJP(),
         '/webViewJP': (context) => SoftwareWebViewScreenJP(linkID: 5),
       },
     );
