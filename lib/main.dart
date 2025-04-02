@@ -53,7 +53,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Tag Search',
+      title: 'WTR Software',
       theme: ThemeData(primarySwatch: Colors.blue),
       initialRoute: initialRoute,
       routes: {
