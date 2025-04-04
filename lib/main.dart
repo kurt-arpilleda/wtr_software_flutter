@@ -3,42 +3,18 @@ import 'webview.dart';
 import 'phorjapan.dart';
 import 'japanFolder/webviewJP.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:unique_identifier/unique_identifier.dart';
-import 'api_service.dart';
-import 'japanFolder/api_serviceJP.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SharedPreferences prefs = await SharedPreferences.getInstance();
   String? phOrJp = prefs.getString('phorjp');
-  String? deviceId = await UniqueIdentifier.serial;
 
   String initialRoute = '/phorjapan'; // Default route
 
-  if (phOrJp == null) {
-    initialRoute = '/phorjapan';
-  } else if (deviceId != null) {
-    try {
-      dynamic response;
-
-      if (phOrJp == "ph") {
-        final apiService = ApiService();
-        response = await apiService.checkDeviceId(deviceId);
-      } else if (phOrJp == "jp") {
-        final apiServiceJP = ApiServiceJP();
-        response = await apiServiceJP.checkDeviceId(deviceId);
-      }
-
-      if (response['success'] == true) {
-        if (phOrJp == "ph") {
-          initialRoute = '/webView';
-        } else if (phOrJp == "jp") {
-          initialRoute = '/webViewJP';
-        }
-      }
-    } catch (e) {
-      print("Error checking device ID: $e");
-    }
+  if (phOrJp == "ph") {
+    initialRoute = '/webView';
+  } else if (phOrJp == "jp") {
+    initialRoute = '/webViewJP';
   }
 
   runApp(MyApp(initialRoute: initialRoute));

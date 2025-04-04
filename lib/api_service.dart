@@ -27,7 +27,6 @@ class ApiService {
     if (deviceId == null) {
       throw Exception("Unable to get device ID");
     }
-
     // First get the ID number associated with this device
     final deviceResponse = await checkDeviceId(deviceId);
     if (!deviceResponse['success']) {

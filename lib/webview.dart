@@ -31,10 +31,6 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
   int? _currentLanguageFlag; // Track the current language flag
   double _progress = 0; // Track the loading progress
   String? _phOrJp; // Track the current country (ph or jp)
-  bool _isPhCountryPressed = false;
-  bool _isJpCountryPressed = false;
-  bool _isCountryLoadingPh = false;
-  bool _isCountryLoadingJp = false;
 
   @override
   void initState() {
@@ -262,23 +258,13 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
       _phOrJp = value;
     });
 
-    String? idNumber = prefs.getString('IDNumber');
-    String? idNumberJP = prefs.getString('IDNumberJP');
-
     if (value == "ph") {
-      if (idNumber == null) {
-        Navigator.pushReplacementNamed(context, '/idInput');
-      } else {
-        Navigator.pushReplacementNamed(context, '/webView');
-      }
+      Navigator.pushReplacementNamed(context, '/webView');
     } else if (value == "jp") {
-      if (idNumberJP == null) {
-        Navigator.pushReplacementNamed(context, '/idInputJP');
-      } else {
-        Navigator.pushReplacementNamed(context, '/webViewJP');
-      }
+      Navigator.pushReplacementNamed(context, '/webViewJP');
     }
   }
+
 
   Future<bool> _onWillPop() async {
     if (await _controller.canGoBack()) {
@@ -546,96 +532,40 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
                         ),
                         SizedBox(width: 25),
                         GestureDetector(
-                          onTapDown: (_) => setState(() => _isPhCountryPressed = true),
-                          onTapUp: (_) => setState(() => _isPhCountryPressed = false),
-                          onTapCancel: () => setState(() => _isPhCountryPressed = false),
                           onTap: () => _updatePhOrJp("ph"),
-                          child: AnimatedContainer(
-                            duration: Duration(milliseconds: 100),
-                            transform: Matrix4.identity()..scale(_isPhCountryPressed ? 0.95 : 1.0),
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                Image.asset(
-                                  'assets/images/philippines.png',
+                          child: Column(
+                            children: [
+                              Image.asset(
+                                'assets/images/philippines.png',
+                                width: 40,
+                                height: 40,
+                              ),
+                              if (_phOrJp == "ph")
+                                Container(
+                                  height: 2,
                                   width: 40,
-                                  height: 40,
+                                  color: Colors.blue,
                                 ),
-                                // Subtle reload icon (only visible when PH is active and not loading)
-                                if (_phOrJp == "ph" && !_isCountryLoadingPh)
-                                  Opacity(
-                                    opacity: 0.6, // Make it subtle
-                                    child: Icon(Icons.refresh, size: 20, color: Colors.white),
-                                  ),
-                                // Loading indicator
-                                if (_isCountryLoadingPh)
-                                  SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                // Underline
-                                if (_phOrJp == "ph")
-                                  Positioned(
-                                    bottom: 0,
-                                    child: Container(
-                                      height: 2,
-                                      width: 40,
-                                      color: Colors.blue,
-                                    ),
-                                  ),
-                              ],
-                            ),
+                            ],
                           ),
                         ),
                         SizedBox(width: 30),
                         GestureDetector(
-                          onTapDown: (_) => setState(() => _isJpCountryPressed = true),
-                          onTapUp: (_) => setState(() => _isJpCountryPressed = false),
-                          onTapCancel: () => setState(() => _isJpCountryPressed = false),
                           onTap: () => _updatePhOrJp("jp"),
-                          child: AnimatedContainer(
-                            duration: Duration(milliseconds: 100),
-                            transform: Matrix4.identity()..scale(_isJpCountryPressed ? 0.95 : 1.0),
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                Image.asset(
-                                  'assets/images/japan.png',
+                          child: Column(
+                            children: [
+                              Image.asset(
+                                'assets/images/japan.png',
+                                width: 40,
+                                height: 40,
+                              ),
+                              if (_phOrJp == "jp")
+                                Container(
+                                  height: 2,
                                   width: 40,
-                                  height: 40,
+                                  color: Colors.blue,
                                 ),
-                                // Subtle reload icon (only visible when JP is active and not loading)
-                                if (_phOrJp == "jp" && !_isCountryLoadingJp)
-                                  Opacity(
-                                    opacity: 0.6, // Make it subtle
-                                    child: Icon(Icons.refresh, size: 20, color: Colors.white),
-                                  ),
-                                // Loading indicator
-                                if (_isCountryLoadingJp)
-                                  SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                // Underline
-                                if (_phOrJp == "jp")
-                                  Positioned(
-                                    bottom: 0,
-                                    child: Container(
-                                      height: 2,
-                                      width: 40,
-                                      color: Colors.blue,
-                                    ),
-                                  ),
-                              ],
-                            ),
+                            ],
                           ),
                         ),
                       ],
