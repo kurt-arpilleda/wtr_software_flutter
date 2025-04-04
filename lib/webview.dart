@@ -7,6 +7,7 @@ import 'package:fluttertoast/fluttertoast.dart';
 import 'auto_update.dart';
 import 'package:http/http.dart' as http;
 import 'dart:io';
+import 'package:unique_identifier/unique_identifier.dart';
 
 class SoftwareWebViewScreen extends StatefulWidget {
   final int linkID;
@@ -23,14 +24,18 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String? _webUrl;
   final TextEditingController _idController = TextEditingController();
-  String? _savedIdNumber;
   String? _profilePictureUrl;
   String? _firstName;
   String? _surName;
   bool _isLoading = true;
-  int? _currentLanguageFlag; // Track the current language flag
-  double _progress = 0; // Track the loading progress
-  String? _phOrJp; // Track the current country (ph or jp)
+  int? _currentLanguageFlag;
+  double _progress = 0;
+  String? _phOrJp;
+  bool _isLoggedIn = false;
+  String? _deviceId;
+  String? _currentIdNumber;
+  bool _isProfileLoading = false;
+  bool _isSaving = false;
 
   @override
   void initState() {
@@ -59,14 +64,38 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
         ),
       );
 
+    _initializeDeviceId();
     _fetchAndLoadUrl();
-    _loadIdNumber();
-    _fetchProfile();
-    _loadCurrentLanguageFlag();
     _loadPhOrJp();
-
-    // Check for updates
+    _loadCurrentLanguageFlag();
     AutoUpdate.checkForUpdate(context);
+  }
+
+  Future<void> _initializeDeviceId() async {
+    try {
+      _deviceId = await UniqueIdentifier.serial;
+      if (_deviceId != null) {
+        _loadLastIdNumber();
+      }
+    } catch (e) {
+      print("Error getting device ID: $e");
+    }
+  }
+
+  Future<void> _loadLastIdNumber() async {
+    try {
+      String? lastIdNumber = await apiService.getLastIdNumber(_deviceId!);
+      if (lastIdNumber != null && lastIdNumber.isNotEmpty) {
+        _idController.text = lastIdNumber;
+        await _fetchProfile(lastIdNumber);
+        setState(() {
+          _isLoggedIn = true;
+          _currentIdNumber = lastIdNumber;
+        });
+      }
+    } catch (e) {
+      print('Error loading last ID number: $e');
+    }
   }
 
   Future<void> _loadPhOrJp() async {
@@ -76,42 +105,36 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
     });
   }
 
-  Future<void> _loadIdNumber() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    _savedIdNumber = prefs.getString('IDNumber');
-    if (_savedIdNumber != null) {
-      setState(() {
-        _idController.text = _savedIdNumber!;
-      });
-    }
-  }
+  Future<void> _fetchProfile(String idNumber) async {
+    setState(() {
+      _isProfileLoading = true;
+    });
 
-  Future<void> _fetchProfile() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? idNumber = prefs.getString('IDNumber');
+    try {
+      final profileData = await apiService.fetchProfile(idNumber);
+      if (profileData["success"] == true) {
+        String profilePictureFileName = profileData["picture"];
 
-    if (idNumber != null) {
-      try {
-        final profileData = await apiService.fetchProfile(idNumber);
-        if (profileData["success"] == true) {
-          String profilePictureFileName = profileData["picture"];
+        String primaryUrl = "${ApiService.apiUrls[0]}V4/11-A%20Employee%20List%20V2/profilepictures/$profilePictureFileName";
+        bool isPrimaryUrlValid = await _isImageAvailable(primaryUrl);
 
-          String primaryUrl = "${ApiService.apiUrls[0]}V4/11-A%20Employee%20List%20V2/profilepictures/$profilePictureFileName";
-          bool isPrimaryUrlValid = await _isImageAvailable(primaryUrl);
+        String fallbackUrl = "${ApiService.apiUrls[1]}V4/11-A%20Employee%20List%20V2/profilepictures/$profilePictureFileName";
+        bool isFallbackUrlValid = await _isImageAvailable(fallbackUrl);
 
-          String fallbackUrl = "${ApiService.apiUrls[1]}V4/11-A%20Employee%20List%20V2/profilepictures/$profilePictureFileName";
-          bool isFallbackUrlValid = await _isImageAvailable(fallbackUrl);
-
-          setState(() {
-            _firstName = profileData["firstName"];
-            _surName = profileData["surName"];
-            _profilePictureUrl = isPrimaryUrlValid ? primaryUrl : isFallbackUrlValid ? fallbackUrl : null;
-            _currentLanguageFlag = profileData["languageFlag"];
-          });
-        }
-      } catch (e) {
-        print("Error fetching profile: $e");
+        setState(() {
+          _firstName = profileData["firstName"];
+          _surName = profileData["surName"];
+          _profilePictureUrl = isPrimaryUrlValid ? primaryUrl : isFallbackUrlValid ? fallbackUrl : null;
+          _currentIdNumber = idNumber;
+          _isLoggedIn = true;
+        });
       }
+    } catch (e) {
+      print("Error fetching profile: $e");
+    } finally {
+      setState(() {
+        _isProfileLoading = false;
+      });
     }
   }
 
@@ -124,84 +147,122 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
     }
   }
 
-
   Future<void> _saveIdNumber() async {
     String newIdNumber = _idController.text.trim();
 
     if (newIdNumber.isEmpty) {
-      setState(() {
-        _idController.text = _savedIdNumber ?? '';
-      });
-
       Fluttertoast.showToast(
         msg: "ID Number cannot be empty!",
         toastLength: Toast.LENGTH_SHORT,
         gravity: ToastGravity.BOTTOM,
         backgroundColor: Colors.red,
         textColor: Colors.white,
-        fontSize: 16.0,
       );
       return;
     }
 
-    if (newIdNumber == _savedIdNumber) {
+    if (newIdNumber == _currentIdNumber) {
       Fluttertoast.showToast(
         msg: "Edit the ID number first!",
         toastLength: Toast.LENGTH_SHORT,
         gravity: ToastGravity.BOTTOM,
         backgroundColor: Colors.orange,
         textColor: Colors.white,
-        fontSize: 16.0,
       );
       return;
     }
 
+    setState(() {
+      _isSaving = true;
+    });
+
     try {
-      bool idExists = await apiService.checkIdNumber(newIdNumber);
+      final actualIdNumber = await apiService.insertIdNumber(
+        newIdNumber,
+        deviceId: _deviceId!,
+      );
 
-      if (idExists) {
-        SharedPreferences prefs = await SharedPreferences.getInstance();
-        await prefs.setString('IDNumber', newIdNumber);
-        _savedIdNumber = newIdNumber;
+      await _fetchProfile(actualIdNumber);
 
-        Fluttertoast.showToast(
-          msg: "ID Number saved successfully!",
-          toastLength: Toast.LENGTH_SHORT,
-          gravity: ToastGravity.BOTTOM,
-          backgroundColor: Colors.green,
-          textColor: Colors.white,
-          fontSize: 16.0,
-        );
+      Fluttertoast.showToast(
+        msg: "ID Number saved successfully!",
+        toastLength: Toast.LENGTH_SHORT,
+        gravity: ToastGravity.BOTTOM,
+        backgroundColor: Colors.green,
+        textColor: Colors.white,
+      );
 
-        _fetchAndLoadUrl();
-        _fetchProfile(); // Refresh profile data
-      } else {
-        Fluttertoast.showToast(
-          msg: "This ID Number does not exist in the employee database.",
-          toastLength: Toast.LENGTH_SHORT,
-          gravity: ToastGravity.BOTTOM,
-          backgroundColor: Colors.red,
-          textColor: Colors.white,
-          fontSize: 16.0,
-        );
-
-        setState(() {
-          _idController.text = _savedIdNumber ?? '';
-        });
-      }
+      // Reload the webview with new ID
+      _fetchAndLoadUrl();
     } catch (e) {
       Fluttertoast.showToast(
-        msg: "Failed to verify ID Number",
+        msg: e.toString().replaceFirst("Exception: ", ""),
         toastLength: Toast.LENGTH_SHORT,
         gravity: ToastGravity.BOTTOM,
         backgroundColor: Colors.red,
         textColor: Colors.white,
-        fontSize: 16.0,
       );
 
       setState(() {
-        _idController.text = _savedIdNumber ?? '';
+        _idController.text = _currentIdNumber ?? '';
       });
+    } finally {
+      setState(() {
+        _isSaving = false;
+      });
+    }
+  }
+
+  Future<void> _logout() async {
+    bool confirm = await showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("Confirm Logout"),
+          content: const Text("Are you sure you want to logout?"),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text("Cancel"),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text("Logout"),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirm == true) {
+      try {
+        await apiService.logout(_deviceId!);
+        setState(() {
+          _isLoggedIn = false;
+          _firstName = null;
+          _surName = null;
+          _profilePictureUrl = null;
+          _currentIdNumber = null;
+          _idController.clear();
+        });
+        // Reload the webview to show the "Please provide ID Number" message
+        _fetchAndLoadUrl();
+
+        Fluttertoast.showToast(
+          msg: "Logged out successfully",
+          toastLength: Toast.LENGTH_SHORT,
+          gravity: ToastGravity.BOTTOM,
+          backgroundColor: Colors.green,
+          textColor: Colors.white,
+        );
+      } catch (e) {
+        Fluttertoast.showToast(
+          msg: "Error logging out: ${e.toString()}",
+          toastLength: Toast.LENGTH_SHORT,
+          gravity: ToastGravity.BOTTOM,
+          backgroundColor: Colors.red,
+          textColor: Colors.white,
+        );
+      }
     }
   }
 
@@ -216,6 +277,13 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
       }
     } catch (e) {
       debugPrint("Error fetching link: $e");
+      Fluttertoast.showToast(
+        msg: "Error loading content: ${e.toString()}",
+        toastLength: Toast.LENGTH_LONG,
+        gravity: ToastGravity.BOTTOM,
+        backgroundColor: Colors.red,
+        textColor: Colors.white,
+      );
     }
   }
 
@@ -227,27 +295,25 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
   }
 
   Future<void> _updateLanguageFlag(int flag) async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? idNumber = prefs.getString('IDNumber');
+    if (_currentIdNumber == null) return;
 
-    if (idNumber != null) {
-      setState(() {
-        _currentLanguageFlag = flag;
-      });
-      try {
-        await apiService.updateLanguageFlag(idNumber, flag);
-        await prefs.setInt('languageFlag', flag);
+    setState(() {
+      _currentLanguageFlag = flag;
+    });
 
-        String? currentUrl = await _controller.currentUrl();
+    try {
+      await apiService.updateLanguageFlag(_currentIdNumber!, flag);
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('languageFlag', flag);
 
-        if (currentUrl != null) {
-          _controller.loadRequest(Uri.parse(currentUrl));
-        } else {
-          _controller.reload();
-        }
-      } catch (e) {
-        print("Error updating language flag: $e");
+      String? currentUrl = await _controller.currentUrl();
+      if (currentUrl != null) {
+        _controller.loadRequest(Uri.parse(currentUrl));
+      } else {
+        _controller.reload();
       }
+    } catch (e) {
+      print("Error updating language flag: $e");
     }
   }
 
@@ -265,22 +331,12 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
     }
   }
 
-
-  Future<bool> _onWillPop() async {
-    if (await _controller.canGoBack()) {
-      _controller.goBack();
-      return false; // Prevent the app from popping the current screen
-    } else {
-      return true; // Allow the app to pop the current screen
-    }
-  }
   Future<void> _showInputMethodPicker() async {
     try {
       if (Platform.isAndroid) {
         const MethodChannel channel = MethodChannel('input_method_channel');
         await channel.invokeMethod('showInputMethodPicker');
       } else {
-        // iOS doesn't have this capability
         Fluttertoast.showToast(
           msg: "Keyboard selection is only available on Android",
           toastLength: Toast.LENGTH_SHORT,
@@ -291,6 +347,16 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
       debugPrint("Error showing input method picker: $e");
     }
   }
+
+  Future<bool> _onWillPop() async {
+    if (await _controller.canGoBack()) {
+      _controller.goBack();
+      return false;
+    } else {
+      return true;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -308,10 +374,7 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
               leading: Padding(
                 padding: const EdgeInsets.only(left: 10.0),
                 child: IconButton(
-                  icon: Icon(
-                    Icons.settings,
-                    color: Colors.white,
-                  ),
+                  icon: Icon(Icons.settings, color: Colors.white),
                   onPressed: () {
                     _scaffoldKey.currentState?.openDrawer();
                   },
@@ -337,9 +400,9 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
                     ),
                     onPressed: () {
                       if (Platform.isIOS) {
-                        exit(0); // Terminate the app on iOS
+                        exit(0);
                       } else {
-                        SystemNavigator.pop(); // Navigate back on Android
+                        SystemNavigator.pop();
                       }
                     },
                   ),
@@ -366,36 +429,158 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
                           Container(
                             width: double.infinity,
                             color: Color(0xFF2053B3),
-                            padding: EdgeInsets.only(top: 50, bottom: 20),
+                            padding: EdgeInsets.only(top: 20, bottom: 20),
                             child: Column(
                               children: [
-                                Align(
-                                  alignment: Alignment.center,
-                                  child: CircleAvatar(
-                                    radius: 50,
-                                    backgroundColor: Colors.white,
-                                    backgroundImage: _profilePictureUrl != null
-                                        ? NetworkImage(_profilePictureUrl!)
-                                        : null,
-                                    child: _profilePictureUrl == null
-                                        ? FlutterLogo(size: 60)
-                                        : null,
+                                Container(
+                                  width: 130,
+                                  height: 130,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Colors.blue[50],
+                                    border: Border.all(
+                                      color: Color(0xFF2053B3),
+                                      width: 3,
+                                    ),
+                                  ),
+                                  child: _isLoggedIn && _profilePictureUrl != null
+                                      ? ClipOval(
+                                    child: Image.network(
+                                      _profilePictureUrl!,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stackTrace) => Icon(
+                                        Icons.person,
+                                        size: 70,
+                                        color: Color(0xFF2053B3),
+                                      ),
+                                    ),
+                                  )
+                                      : Icon(
+                                    Icons.person,
+                                    size: 70,
+                                    color: Color(0xFF2053B3),
                                   ),
                                 ),
-                                SizedBox(height: 10),
-                                Text(
-                                  _firstName != null && _surName != null
-                                      ? "$_firstName $_surName"
-                                      : "User Name",
-                                  style: TextStyle(
+                                if (_isLoggedIn) ...[
+                                  SizedBox(height: 10),
+                                  Text(
+                                    _firstName != null && _surName != null
+                                        ? "$_firstName $_surName"
+                                        : "User Profile",
+                                    style: TextStyle(
                                       color: Colors.white,
                                       fontSize: 18,
-                                      fontWeight: FontWeight.bold),
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  if (_currentIdNumber != null) ...[
+                                    SizedBox(height: 5),
+                                    Text(
+                                      "ID: $_currentIdNumber",
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ],
+                            ),
+                          ),
+                          SizedBox(height: 20),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (!_isLoggedIn) ...[
+                                  Text(
+                                    "ID Number",
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  SizedBox(height: 8),
+                                  TextField(
+                                    controller: _idController,
+                                    decoration: InputDecoration(
+                                      hintText: "Enter ID Number",
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(height: 20),
+                                ],
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton(
+                                    onPressed: _isSaving
+                                        ? null
+                                        : _isLoggedIn
+                                        ? _logout
+                                        : () async {
+                                      setState(() {
+                                        _isSaving = true;
+                                      });
+                                      try {
+                                        final actualIdNumber = await apiService.insertIdNumber(
+                                          _idController.text.trim(),
+                                          deviceId: _deviceId!,
+                                        );
+                                        await _fetchProfile(actualIdNumber);
+                                        Fluttertoast.showToast(
+                                          msg: "Logged in successfully!",
+                                          toastLength: Toast.LENGTH_SHORT,
+                                          gravity: ToastGravity.BOTTOM,
+                                          backgroundColor: Colors.green,
+                                          textColor: Colors.white,
+                                        );
+                                        _fetchAndLoadUrl();
+                                      } catch (e) {
+                                        Fluttertoast.showToast(
+                                          msg: e.toString().replaceFirst("Exception: ", ""),
+                                          toastLength: Toast.LENGTH_SHORT,
+                                          gravity: ToastGravity.BOTTOM,
+                                          backgroundColor: Colors.red,
+                                          textColor: Colors.white,
+                                        );
+                                      } finally {
+                                        setState(() {
+                                          _isSaving = false;
+                                        });
+                                      }
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: _isLoggedIn ? Colors.red : Color(0xFF2053B3),
+                                      padding: EdgeInsets.symmetric(vertical: 12),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                    child: _isSaving
+                                        ? SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                        : Text(
+                                      _isLoggedIn ? "LOGOUT" : "LOGIN",
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
                           ),
-                          SizedBox(height: 10),
+                          SizedBox(height: 20),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 16.0),
                             child: Row(
@@ -448,69 +633,22 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
                               ],
                             ),
                           ),
-                          SizedBox(height: 10),
+                          SizedBox(height: 20),
                           Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                            child: Row(
                               children: [
                                 Text(
-                                  "User",
+                                  "Keyboard",
                                   style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                                SizedBox(height: 5),
-                                TextField(
-                                  controller: _idController,
-                                  decoration: InputDecoration(
-                                    hintText: "ID Number",
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                  ),
-                                ),
-                                SizedBox(height: 10),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton(
-                                    onPressed: _saveIdNumber,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Color(0xFF2053B3),
-                                      padding: EdgeInsets.symmetric(vertical: 12),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                    ),
-                                    child: Text(
-                                      "Save",
-                                      style: TextStyle(color: Colors.white, fontSize: 16),
-                                    ),
-                                  ),
-                                ),
-                                SizedBox(height: 20), // Added spacing here
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 0), // Aligned with other labels
-                                  child: Row(
-                                    children: [
-                                      Text(
-                                        "Keyboard",
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      Spacer(),
-                                      IconButton(
-                                        icon: Icon(Icons.keyboard, size: 28), // Made icon bigger
-                                        iconSize: 28,
-                                        onPressed: () {
-                                          _showInputMethodPicker();
-                                        },
-                                      ),
-                                    ],
-                                  ),
+                                Spacer(),
+                                IconButton(
+                                  icon: Icon(Icons.keyboard, size: 28),
+                                  onPressed: _showInputMethodPicker,
                                 ),
                               ],
                             ),
@@ -594,4 +732,3 @@ class _SoftwareWebViewScreenState extends State<SoftwareWebViewScreen> {
     );
   }
 }
-
